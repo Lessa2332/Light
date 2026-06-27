@@ -2,125 +2,133 @@
 
 AFRAME.registerComponent('tap-place', {
   init() {
-    const scene = this.el.sceneEl;
+    this.scene = this.el.sceneEl;
+    this.audioCtx = null;
+    this.trafficLights = [];
 
-    // Функція створення реалістичного світлофора висотою рівно 1.5 метра
-    function createTrafficLight(position) {
+    // Звуковий сигнал (Web Audio API)
+    this.playClick = () => {
+      if (!this.audioCtx) this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = this.audioCtx.createOscillator();
+      const gain = this.audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(this.audioCtx.destination);
+      osc.frequency.value = 800;
+      gain.gain.setValueAtTime(0.1, this.audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.00001, this.audioCtx.currentTime + 0.1);
+      osc.start();
+      osc.stop(this.audioCtx.currentTime + 0.1);
+    };
+
+    // Функція створення зебри
+    const createCrosswalk = (group) => {
+      const crosswalk = document.createElement('a-entity');
+      for (let i = 0; i < 10; i++) {
+        const stripe = document.createElement('a-box');
+        // Зебра розміщена перед світлофором
+        stripe.setAttribute('position', `0 0.01 ${i * 0.5 - 2.5}`);
+        stripe.setAttribute('width', '2');
+        stripe.setAttribute('height', '0.02');
+        stripe.setAttribute('depth', '0.3');
+        stripe.setAttribute('color', '#ffffff');
+        crosswalk.appendChild(stripe);
+      }
+      group.appendChild(crosswalk);
+    };
+
+    // Функція створення світлофора
+    const createTrafficLight = (position) => {
+      // Обмеження до 5 штук
+      if (this.trafficLights.length >= 5) {
+        const oldestLight = this.trafficLights.shift();
+        if (oldestLight.state.interval) clearInterval(oldestLight.state.interval);
+        oldestLight.parentNode.removeChild(oldestLight);
+      }
+
       const group = document.createElement('a-entity');
       group.classList.add('traffic-light');
       group.setAttribute('position', position);
 
-      // 1. Стовпчик (висота 0.9м)
+      createCrosswalk(group);
+
+      // Стовп (1.2м)
       const pole = document.createElement('a-cylinder');
-      pole.setAttribute('position', '0 0.45 0'); // Центр стовпчика на висоті 0.45м
-      pole.setAttribute('radius', '0.04');
-      pole.setAttribute('height', '0.9');
-      pole.setAttribute('color', '#333333');
+      pole.setAttribute('position', '0 0.6 0');
+      pole.setAttribute('radius', '0.05');
+      pole.setAttribute('height', '1.2');
+      pole.setAttribute('color', '#333');
       group.appendChild(pole);
 
-      // 2. Основний корпус (висота 0.6м). Загальна висота: 0.9 + 0.6 = 1.5м
+      // Корпус (0.8м)
       const body = document.createElement('a-box');
-      body.setAttribute('position', '0 1.2 0'); // Центр корпусу на висоті 1.2м
-      body.setAttribute('width', '0.3');
-      body.setAttribute('height', '0.6');
-      body.setAttribute('depth', '0.15');
+      body.setAttribute('position', '0 1.6 0');
+      body.setAttribute('width', '0.4');
+      body.setAttribute('height', '0.8');
+      body.setAttribute('depth', '0.2');
       body.setAttribute('color', '#1a1a1a');
-      // ВАЖЛИВО: додаємо cantap, щоб клік по корпусу теж фіксувався
-      body.classList.add('light-body', 'cantap'); 
+      body.classList.add('light-body', 'cantap');
       group.appendChild(body);
 
-      // 3. Кольори та позиції лінз (відносно землі)
-      const colors = [
-        { on: '#FF0000', off: '#4a0000', hex: '#FF0000' }, // Червоний
-        { on: '#FFCC00', off: '#4a4a00', hex: '#FFCC00' }, // Жовтий
-        { on: '#00FF00', off: '#002200', hex: '#00FF00' }  // Зелений
-      ];
-      const positions = [1.4, 1.2, 1.0]; // Y позиції (верхня на 1.4м, нижня на 1.0м)
-
+      // Лінзи
+      const positions = [1.85, 1.6, 1.35];
       const lights = [];
-      
-      positions.forEach((yPos, index) => {
-        // Захисні козирки для реалістичності
-        const visor = document.createElement('a-cylinder');
-        visor.setAttribute('position', `0 ${yPos + 0.02} 0.08`);
-        visor.setAttribute('rotation', '90 0 0');
-        visor.setAttribute('theta-start', '90');
-        visor.setAttribute('theta-length', '180');
-        visor.setAttribute('radius', '0.08');
-        visor.setAttribute('height', '0.05');
-        visor.setAttribute('color', '#1a1a1a');
-        group.appendChild(visor);
-
-        // Сама лінза (лампочка)
+      positions.forEach((y, i) => {
         const sphere = document.createElement('a-sphere');
-        sphere.setAttribute('position', `0 ${yPos} 0.08`);
-        sphere.setAttribute('radius', '0.06');
-        sphere.setAttribute('color', colors[index].off);
-        sphere.setAttribute('emissive', colors[index].hex);
-        sphere.setAttribute('emissive-intensity', '0');
-        sphere.dataset.index = index;
-        // ВАЖЛИВО: додаємо cantap для взаємодії
+        sphere.setAttribute('position', `0 ${y} 0.11`);
+        sphere.setAttribute('radius', '0.08');
+        sphere.setAttribute('color', '#222');
         sphere.classList.add('light-bulb', 'cantap');
+        sphere.dataset.index = i;
         group.appendChild(sphere);
         lights.push(sphere);
       });
 
-      // Функція активації сигналу з анімацією
-      group.activateLight = function(index) {
-        lights.forEach((light, i) => {
-          if (i === index) {
-            light.setAttribute('color', colors[i].on);
-            // Додаємо плавну пульсацію увімкненого сигналу
-            light.setAttribute('animation', 'property: material.emissiveIntensity; from: 0.8; to: 1.5; dir: alternate; dur: 600; loop: true');
-          } else {
-            // Вимикаємо анімацію та світло для інших
-            light.removeAttribute('animation');
-            light.setAttribute('color', colors[i].off);
-            light.setAttribute('emissive-intensity', '0.1'); // Ледь помітний відблиск
-          }
+      group.state = { activeIndex: 0, timer: 10, interval: null };
+
+      // Логіка вмикання
+      group.activateLight = (index) => {
+        group.state.activeIndex = index;
+        lights.forEach((l, i) => {
+          const color = i === 0 ? '#ff0000' : i === 1 ? '#ffcc00' : '#00ff00';
+          l.setAttribute('color', i === index ? color : '#222');
+          l.setAttribute('material', 'emissive', i === index ? color : '#000');
+          l.setAttribute('material', 'emissiveIntensity', i === index ? 2 : 0);
         });
-        group.dataset.activeSignal = index;
+
+        if (group.state.interval) clearInterval(group.state.interval);
+        
+        // Звуковий сигнал на зелений
+        if (index === 2) {
+          group.state.timer = 10;
+          group.state.interval = setInterval(() => {
+            group.state.timer--;
+            this.playClick();
+            if (group.state.timer <= 0) clearInterval(group.state.interval);
+          }, 1000);
+        }
       };
 
-      // Початково вмикаємо червоний
       group.activateLight(0);
-
+      this.trafficLights.push(group);
       return group;
-    }
+    };
 
-    // Обробник кліків
-    scene.addEventListener('click', (event) => {
-      if (!event.detail || !event.detail.intersection) return;
-
-      const clickedEl = event.detail.intersection.object.el;
-
-      // 1. Перевіряємо, чи клікнули на світлофор (по лінзі АБО по корпусу)
-      if (clickedEl && (clickedEl.classList.contains('light-bulb') || clickedEl.classList.contains('light-body'))) {
-        const lightGroup = clickedEl.closest('.traffic-light');
-        if (lightGroup) {
-          const currentIndex = parseInt(lightGroup.dataset.activeSignal, 10);
-          const nextIndex = (currentIndex + 1) % 3;
-          lightGroup.activateLight(nextIndex);
-          return; // Виходимо, щоб не поставити новий світлофор
-        }
+    // Обробник кліку
+    this.scene.addEventListener('click', (e) => {
+      if (!e.detail.intersection) return;
+      
+      const el = e.detail.intersection.object.el;
+      
+      if (el && (el.classList.contains('light-bulb') || el.classList.contains('light-body'))) {
+        const group = el.closest('.traffic-light');
+        const next = (group.state.activeIndex + 1) % 3;
+        group.activateLight(next);
+        return; 
       }
 
-      // 2. Якщо клікнули на землю — ставимо новий світлофор
-      if (clickedEl && clickedEl.id === 'ground') {
-        const point = event.detail.intersection.point;
-        
-        const newLight = createTrafficLight({
-          x: point.x,
-          y: point.y,
-          z: point.z
-        });
-
-        // Випадкове обертання навколо своєї осі, щоб не всі дивились в один бік
-        const rotY = Math.random() * 360;
-        newLight.setAttribute('rotation', `0 ${rotY} 0`);
-
-        // Ми більше НЕ використовуємо scale. Об'єкт згенеровано одразу у масштабі 1:1 (1.5м)
-        scene.appendChild(newLight);
+      if (el && el.id === 'ground') {
+        const p = e.detail.intersection.point;
+        this.scene.appendChild(createTrafficLight(`${p.x} ${p.y} ${p.z}`));
       }
     });
   }
