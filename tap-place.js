@@ -6,6 +6,7 @@ AFRAME.registerComponent('tap-place', {
     this.audioCtx = null;
     this.trafficLights = [];
 
+    // Звук пікання
     this.playClick = () => {
       if (!this.audioCtx) this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const osc = this.audioCtx.createOscillator();
@@ -19,24 +20,13 @@ AFRAME.registerComponent('tap-place', {
       osc.stop(this.audioCtx.currentTime + 0.1);
     };
 
-    const createTrafficLight = (position) => {
-      if (this.trafficLights.length >= 5) {
-        const oldestLight = this.trafficLights.shift();
-        if (oldestLight.intervalId) clearInterval(oldestLight.intervalId);
-        oldestLight.parentNode.removeChild(oldestLight);
-      }
-
-      const group = document.createElement('a-entity');
-      group.classList.add('traffic-light');
-      group.setAttribute('position', position);
-      group.activeIndex = 0; // Зберігаємо стан прямо на об'єкті
-      group.intervalId = null;
-
-      // Зебра: тепер починається від 0 і йде "назад" (від'ємні Z), світлофор в точці 0
+    // Функція створення зебри
+    const createCrosswalk = (group, position) => {
       const crosswalk = document.createElement('a-entity');
+      // Зебра лежить перед світлофором (зміщена по Z)
       for (let i = 0; i < 10; i++) {
         const stripe = document.createElement('a-box');
-        stripe.setAttribute('position', `0 0.01 ${-i * 0.5 - 0.5}`); 
+        stripe.setAttribute('position', `0 0.01 ${i * 0.5 - 2.5}`); // Розставляємо 10 полосок
         stripe.setAttribute('width', '2');
         stripe.setAttribute('height', '0.02');
         stripe.setAttribute('depth', '0.3');
@@ -44,7 +34,23 @@ AFRAME.registerComponent('tap-place', {
         crosswalk.appendChild(stripe);
       }
       group.appendChild(crosswalk);
+    };
 
+    const createTrafficLight = (position) => {
+      if (this.trafficLights.length >= 5) {
+        const oldestLight = this.trafficLights.shift();
+        if (oldestLight.state.interval) clearInterval(oldestLight.state.interval);
+        oldestLight.parentNode.removeChild(oldestLight);
+      }
+
+      const group = document.createElement('a-entity');
+      group.classList.add('traffic-light');
+      group.setAttribute('position', position);
+
+      // Додаємо зебру
+      createCrosswalk(group, position);
+
+      // Стовп і корпус
       const pole = document.createElement('a-cylinder');
       pole.setAttribute('position', '0 0.6 0');
       pole.setAttribute('radius', '0.05');
@@ -69,40 +75,33 @@ AFRAME.registerComponent('tap-place', {
         sphere.setAttribute('radius', '0.08');
         sphere.setAttribute('color', '#222');
         sphere.classList.add('light-bulb', 'cantap');
-        sphere.lightIndex = i; // Ідентифікатор лампи
+        sphere.dataset.index = i;
         group.appendChild(sphere);
         lights.push(sphere);
       });
 
-      // Функція перемикання
-      group.updateLight = function() {
-        this.activeIndex = (this.activeIndex + 1) % 3;
-        const index = this.activeIndex;
-        
+      group.state = { activeIndex: 0, timer: 10, interval: null };
+
+      group.activateLight = (index) => {
+        group.state.activeIndex = index;
         lights.forEach((l, i) => {
-          const color = i === 0 ? '#ff0000' : i === 1 ? '#ffcc00' : '#00ff00';
-          l.setAttribute('color', i === index ? color : '#222');
-          l.setAttribute('material', 'emissive', i === index ? color : '#000');
+          l.setAttribute('color', i === index ? (i === 0 ? '#ff0000' : i === 1 ? '#ffcc00' : '#00ff00') : '#222');
+          l.setAttribute('material', 'emissive', i === index ? (i === 0 ? '#ff0000' : i === 1 ? '#ffcc00' : '#00ff00') : '#000');
           l.setAttribute('material', 'emissiveIntensity', i === index ? 2 : 0);
         });
 
-        if (this.intervalId) clearInterval(this.intervalId);
+        if (group.state.interval) clearInterval(group.state.interval);
         if (index === 2) {
-          let timer = 10;
-          this.intervalId = setInterval(() => {
-            timer--;
-            this.playClick(); // Ми звертаємось до методу компонента через замикання
-            if (timer <= 0) clearInterval(this.intervalId);
+          group.state.timer = 10;
+          group.state.interval = setInterval(() => {
+            group.state.timer--;
+            this.playClick();
+            if (group.state.timer <= 0) clearInterval(group.state.interval);
           }, 1000);
         }
       };
 
-      // Ініціалізація кольору
-      group.updateLight(); // Вмикає червоний
-      // Трохи хак: відразу перемикаємо, бо функція при ініціалізації робить +1
-      group.activeIndex = -1; 
-      group.updateLight();
-
+      group.activateLight(0);
       this.trafficLights.push(group);
       return group;
     };
@@ -110,17 +109,17 @@ AFRAME.registerComponent('tap-place', {
     this.scene.addEventListener('click', (e) => {
       if (!e.detail.intersection) return;
       const el = e.detail.intersection.object.el;
-
+      
       if (el && (el.classList.contains('light-bulb') || el.classList.contains('light-body'))) {
         const group = el.closest('.traffic-light');
-        group.updateLight();
-        return;
+        const next = (group.state.activeIndex + 1) % 3;
+        group.activateLight(next);
+        return; 
       }
 
       if (el && el.id === 'ground') {
         const p = e.detail.intersection.point;
-        const newLight = createTrafficLight(`${p.x} ${p.y} ${p.z}`);
-        this.scene.appendChild(newLight);
+        this.scene.appendChild(createTrafficLight(`${p.x} ${p.y} ${p.z}`));
       }
     });
   }
